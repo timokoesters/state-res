@@ -100,13 +100,15 @@ fn do_check(events: &[StateEvent], edges: Vec<Vec<EventId>>, expected_state_ids:
                     .collect::<Vec<_>>()
             );
 
-            let resolved = StateResolution::resolve(
+            let resolved = state_res::sort_resolved::resolve(
                 &room_id(),
                 &RoomVersionId::Version1,
+                0,
                 &state_sets,
                 Some(event_map.clone()),
                 &store,
             );
+
             match resolved {
                 Ok(state) => state,
                 Err(e) => panic!("resolution for {} failed: {}", node, e),

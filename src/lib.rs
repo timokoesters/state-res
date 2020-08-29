@@ -13,6 +13,7 @@ use ruma::{
 mod error;
 pub mod event_auth;
 pub mod room_version;
+pub mod sort_resolved;
 mod state_event;
 mod state_store;
 
@@ -51,6 +52,9 @@ impl StateResolution {
     ///
     /// * `store` - Any type that implements `StateStore` acts as the database. When an event is not
     /// found in the `event_map` it will be retrieved from the `store`.
+    ///
+    /// It is up the the caller to check that the events returned from `StateStore::get_event` are
+    /// events for the correct room (synapse checks that all events are in the right room).
     pub fn resolve(
         room_id: &RoomId,
         room_version: &RoomVersionId,
@@ -112,16 +116,8 @@ impl StateResolution {
 
         tracing::debug!("event map size: {}", event_map.len());
 
-        for event in event_map.values() {
-            if event.room_id() != Some(room_id) {
-                return Err(Error::InvalidPdu(format!(
-                    "resolving event {} in room {}, when correct room is {}",
-                    event.event_id(),
-                    event.room_id().map(|id| id.as_str()).unwrap_or("`unknown`"),
-                    room_id.as_str()
-                )));
-            }
-        }
+        // we used to check that all events are events from the correct room
+        // this is now a check the caller of `resolve` must make.
 
         // synapse says `full_set = {eid for eid in full_conflicted_set if eid in event_map}`
         //
@@ -664,6 +660,8 @@ impl StateResolution {
     }
 
     // TODO make `event` not clone every loop
+    /// Get the mainline depth from the `mainline_map` or finds a power_level event
+    /// that has an associated mainline depth.
     fn get_mainline_depth(
         room_id: &RoomId,
         mut event: Option<StateEvent>,
