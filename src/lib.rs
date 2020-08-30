@@ -222,8 +222,11 @@ impl StateResolution {
     }
 
     /// Split the events that have no conflicts from those that are conflicting.
+    /// The return tuple looks like `(unconflicted, conflicted)`.
     ///
-    /// The tuple looks like `(unconflicted, conflicted)`.
+    /// State is determined to be conflicting if for the given key (EventType, StateKey) there
+    /// is not exactly one eventId. This includes missing events, if one state_set includes an event
+    /// that none of the other have this is a conflicting event.
     pub fn separate(
         state_sets: &[StateMap<EventId>],
     ) -> (StateMap<EventId>, StateMap<Vec<EventId>>) {
@@ -243,14 +246,6 @@ impl StateResolution {
                 .map(|state_set| state_set.get(key))
                 .dedup()
                 .collect::<Vec<_>>();
-
-            tracing::debug!(
-                "SEP {:?}",
-                event_ids
-                    .iter()
-                    .map(|i| i.map(ToString::to_string).unwrap_or_else(|| "None".into()))
-                    .collect::<Vec<_>>()
-            );
 
             if event_ids.len() == 1 {
                 if let Some(Some(id)) = event_ids.pop() {

@@ -103,7 +103,11 @@ fn do_check(events: &[StateEvent], edges: Vec<Vec<EventId>>, expected_state_ids:
             let resolved = state_res::sort_resolved::resolve(
                 &room_id(),
                 &RoomVersionId::Version1,
-                0,
+                &state_at_event
+                    .iter()
+                    .last()
+                    .map(|(_, map)| map.values().cloned().collect::<Vec<_>>())
+                    .unwrap_or_default(),
                 &state_sets,
                 Some(event_map.clone()),
                 &store,
