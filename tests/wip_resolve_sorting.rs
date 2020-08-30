@@ -1,5 +1,3 @@
-#![allow(clippy::or_fun_call, clippy::expect_fun_call)]
-
 use std::{cell::RefCell, collections::BTreeMap, convert::TryFrom, sync::Once, time::UNIX_EPOCH};
 
 use ruma::{
@@ -11,7 +9,7 @@ use ruma::{
         },
         EventType,
     },
-    identifiers::{EventId, RoomId, RoomVersionId, UserId},
+    user_id, EventId, RoomId, RoomVersionId, UserId,
 };
 use serde_json::{json, Value as JsonValue};
 use state_res::{Error, Result, StateEvent, StateMap, StateResolution, StateStore};
@@ -51,14 +49,20 @@ fn do_check(events: &[StateEvent], edges: Vec<Vec<EventId>>, expected_state_ids:
 
     for pair in INITIAL_EDGES().windows(2) {
         if let [a, b] = &pair {
-            graph.entry(a.clone()).or_insert(vec![]).push(b.clone());
+            graph
+                .entry(a.clone())
+                .or_insert_with(Vec::new)
+                .push(b.clone());
         }
     }
 
     for edge_list in edges {
         for pair in edge_list.windows(2) {
             if let [a, b] = &pair {
-                graph.entry(a.clone()).or_insert(vec![]).push(b.clone());
+                graph
+                    .entry(a.clone())
+                    .or_insert_with(Vec::new)
+                    .push(b.clone());
             }
         }
     }
@@ -67,6 +71,8 @@ fn do_check(events: &[StateEvent], edges: Vec<Vec<EventId>>, expected_state_ids:
     let mut event_map: BTreeMap<EventId, StateEvent> = BTreeMap::new();
     // event_id -> StateMap<EventId>
     let mut state_at_event: BTreeMap<EventId, StateMap<EventId>> = BTreeMap::new();
+
+    let mut sorted_ids = vec![];
 
     // resolve the current state and add it to the state_at_event map then continue
     // on in "time"
@@ -103,11 +109,7 @@ fn do_check(events: &[StateEvent], edges: Vec<Vec<EventId>>, expected_state_ids:
             let resolved = state_res::sort_resolved::resolve(
                 &room_id(),
                 &RoomVersionId::Version1,
-                &state_at_event
-                    .iter()
-                    .last()
-                    .map(|(_, map)| map.values().cloned().collect::<Vec<_>>())
-                    .unwrap_or_default(),
+                &sorted_ids,
                 &state_sets,
                 Some(event_map.clone()),
                 &store,
@@ -160,20 +162,24 @@ fn do_check(events: &[StateEvent], edges: Vec<Vec<EventId>>, expected_state_ids:
         // be giving us state from a DB.
         *store.0.borrow_mut().get_mut(&ev_id).unwrap() = event.clone();
 
-        state_at_event.insert(node, state_after);
+        state_at_event.insert(node.clone(), state_after);
         event_map.insert(event_id.clone(), event);
+
+        sorted_ids.push(node);
     }
 
     let mut expected_state = StateMap::new();
     for node in expected_state_ids {
-        let ev = event_map.get(&node).expect(&format!(
-            "{} not found in {:?}",
-            node.to_string(),
-            event_map
-                .keys()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>(),
-        ));
+        let ev = event_map.get(&node).unwrap_or_else(|| {
+            panic!(
+                "{} not found in {:?}",
+                node.to_string(),
+                event_map
+                    .keys()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+            )
+        });
 
         let key = (ev.kind(), ev.state_key());
 
@@ -192,6 +198,7 @@ fn do_check(events: &[StateEvent], edges: Vec<Vec<EventId>>, expected_state_ids:
 
     assert_eq!(expected_state, end_state);
 }
+
 pub struct TestStore(RefCell<BTreeMap<EventId, StateEvent>>);
 
 #[allow(unused)]
@@ -213,19 +220,22 @@ fn event_id(id: &str) -> EventId {
 }
 
 fn alice() -> UserId {
-    UserId::try_from("@alice:foo").unwrap()
+    user_id!("@alice:foo")
 }
 fn bob() -> UserId {
-    UserId::try_from("@bob:foo").unwrap()
+    user_id!("@bob:foo")
 }
 fn charlie() -> UserId {
-    UserId::try_from("@charlie:foo").unwrap()
+    user_id!("@charlie:foo")
 }
+// fn devin() -> UserId {
+//     user_id!("@devin:foo")
+// }
 fn ella() -> UserId {
-    UserId::try_from("@ella:foo").unwrap()
+    user_id!("@ella:foo")
 }
 fn zara() -> UserId {
-    UserId::try_from("@zara:foo").unwrap()
+    user_id!("@zara:foo")
 }
 
 fn room_id() -> RoomId {
@@ -436,7 +446,39 @@ fn INITIAL_EDGES() -> Vec<EventId> {
         .collect::<Vec<_>>()
 }
 
-// all graphs start with these input events
+#[test]
+fn base_with_auth_chains() {
+    let store = TestStore(RefCell::new(INITIAL_EVENTS()));
+
+    let resolved: BTreeMap<_, EventId> =
+        match StateResolution::resolve(&room_id(), &RoomVersionId::Version2, &[], None, &store) {
+            Ok(state) => state,
+            Err(e) => panic!("{}", e),
+        };
+
+    let resolved = resolved
+        .values()
+        .cloned()
+        .chain(INITIAL_EVENTS().values().map(|e| e.event_id()))
+        .collect::<Vec<_>>();
+
+    let expected = vec![
+        "$CREATE:foo",
+        "$IJR:foo",
+        "$IPOWER:foo",
+        "$IMA:foo",
+        "$IMB:foo",
+        "$IMC:foo",
+        "START",
+        "END",
+    ];
+    for id in expected.iter().map(|i| event_id(i)) {
+        // make sure our resolved events are equal to the expected list
+        assert!(resolved.iter().any(|eid| eid == &id), "{}", id)
+    }
+    assert_eq!(expected.len(), resolved.len())
+}
+
 #[allow(non_snake_case)]
 fn BAN_STATE_SET() -> BTreeMap<EventId, StateEvent> {
     vec![
@@ -501,39 +543,6 @@ fn ban_with_auth_chains() {
         edges,
         expected_state_ids,
     );
-}
-
-#[test]
-fn base_with_auth_chains() {
-    let store = TestStore(RefCell::new(INITIAL_EVENTS()));
-
-    let resolved: BTreeMap<_, EventId> =
-        match StateResolution::resolve(&room_id(), &RoomVersionId::Version2, &[], None, &store) {
-            Ok(state) => state,
-            Err(e) => panic!("{}", e),
-        };
-
-    let resolved = resolved
-        .values()
-        .cloned()
-        .chain(INITIAL_EVENTS().values().map(|e| e.event_id()))
-        .collect::<Vec<_>>();
-
-    let expected = vec![
-        "$CREATE:foo",
-        "$IJR:foo",
-        "$IPOWER:foo",
-        "$IMA:foo",
-        "$IMB:foo",
-        "$IMC:foo",
-        "START",
-        "END",
-    ];
-    for id in expected.iter().map(|i| event_id(i)) {
-        // make sure our resolved events are equall to the expected list
-        assert!(resolved.iter().any(|eid| eid == &id), "{}", id)
-    }
-    assert_eq!(expected.len(), resolved.len())
 }
 
 #[test]
@@ -611,7 +620,6 @@ fn ban_with_auth_chains2() {
     assert_eq!(expected.len(), resolved.len())
 }
 
-// all graphs start with these input events
 #[allow(non_snake_case)]
 fn JOIN_RULE() -> BTreeMap<EventId, StateEvent> {
     vec![
@@ -627,7 +635,7 @@ fn JOIN_RULE() -> BTreeMap<EventId, StateEvent> {
         to_pdu_event(
             "IMZ",
             zara(),
-            EventType::RoomPowerLevels,
+            EventType::RoomMember,
             Some(zara().as_str()),
             member_content_join(),
             &["CREATE", "JR", "IPOWER"],
@@ -649,6 +657,73 @@ fn join_rule_with_auth_chain() {
         .collect::<Vec<_>>();
 
     let expected_state_ids = vec!["JR"].into_iter().map(event_id).collect::<Vec<_>>();
+
+    do_check(
+        &join_rule.values().cloned().collect::<Vec<_>>(),
+        edges,
+        expected_state_ids,
+    );
+}
+
+#[allow(non_snake_case)]
+fn FORK() -> BTreeMap<EventId, StateEvent> {
+    vec![
+        to_pdu_event(
+            "JR",
+            alice(),
+            EventType::RoomJoinRules,
+            Some(""),
+            json!({ "join_rule": JoinRule::Invite }),
+            &["CREATE", "IMA", "IPOWER"],
+            &["START"],
+        ),
+        to_pdu_event(
+            "IMZ",
+            zara(),
+            EventType::RoomMember,
+            Some(zara().as_str()),
+            member_content_join(),
+            &["CREATE", "JR", "IPOWER"],
+            &["START"],
+        ),
+        // to_pdu_event(
+        //     "FMD",
+        //     devin(),
+        //     EventType::RoomMember,
+        //     Some(devin().as_str()),
+        //     member_content_join(),
+        //     &["CREATE", "IJR", "IPOWER"],
+        //     &["START"],
+        // ),
+        // to_pdu_event(
+        //     "FMDL",
+        //     devin(),
+        //     EventType::RoomMember,
+        //     Some(devin().as_str()),
+        //     json!({ "membership": "leave" }),
+        //     &["CREATE", "FMD", "IPOWER"],
+        //     &["FMD"],
+        // ),
+    ]
+    .into_iter()
+    .map(|ev| (ev.event_id(), ev))
+    .collect()
+}
+
+#[test]
+fn sorted_fork() {
+    let join_rule = FORK();
+
+    let edges = vec![
+        vec!["END", "JR", "START"],
+        vec!["END", "IMZ", "START"],
+        // vec!["END", "FMDL", "FMD", "START"],
+    ]
+    .into_iter()
+    .map(|list| list.into_iter().map(event_id).collect::<Vec<_>>())
+    .collect::<Vec<_>>();
+
+    let expected_state_ids = vec![event_id("JR")];
 
     do_check(
         &join_rule.values().cloned().collect::<Vec<_>>(),

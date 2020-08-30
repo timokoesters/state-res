@@ -10,7 +10,7 @@ use ruma::{
         },
         EventType,
     },
-    identifiers::{EventId, RoomId, RoomVersionId, UserId},
+    room_id, user_id, EventId, RoomId, RoomVersionId, UserId,
 };
 use serde_json::{json, Value as JsonValue};
 use state_res::{Error, Result, StateEvent, StateMap, StateResolution, StateStore};
@@ -30,23 +30,23 @@ fn event_id(id: &str) -> EventId {
 }
 
 fn alice() -> UserId {
-    UserId::try_from("@alice:foo").unwrap()
+    user_id!("@alice:foo")
 }
 fn bob() -> UserId {
-    UserId::try_from("@bob:foo").unwrap()
+    user_id!("@bob:foo")
 }
 fn charlie() -> UserId {
-    UserId::try_from("@charlie:foo").unwrap()
+    user_id!("@charlie:foo")
 }
 fn ella() -> UserId {
-    UserId::try_from("@ella:foo").unwrap()
+    user_id!("@ella:foo")
 }
 fn zera() -> UserId {
-    UserId::try_from("@zera:foo").unwrap()
+    user_id!("@zera:foo")
 }
 
 fn room_id() -> RoomId {
-    RoomId::try_from("!test:foo").unwrap()
+    room_id!("!test:foo")
 }
 
 fn member_content_ban() -> JsonValue {

@@ -10,13 +10,49 @@ use crate::{
     StateMap, StateResolution,
 };
 
-#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub enum OwnState<T> {
+    /// This eventId is found in both the `own_state` and the resolved state.
     Clean(T),
+    /// This eventId needs to be added to to the DAG.
+    // TODO this inserts itself after the most recent prev_event that `own_state` knows.
+    // make this more robust
     Add(T),
-    Replaced { remove: T, with: T },
+    /// Remove `replace` and insert `with` in it's spot.
+    Replaced { replace: T, with: T },
+    /// So the sorting of `Replaced` eventId's is kept the `with` ID must be removed.
+    Used(T),
+    /// This is not a valid event, remove it from the DAG.
     Remove(T),
+    /// This event was not handled. Any remaining `NotResolved` variants should
+    /// be considered an error, I think `:p`.
     NotResolved(T),
+}
+
+impl std::fmt::Debug for OwnState<EventId> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OwnState::Add(id) => f.debug_tuple("OwnState::Add").field(&id.as_str()).finish(),
+            OwnState::Clean(id) => f
+                .debug_tuple("OwnState::Clean")
+                .field(&id.as_str())
+                .finish(),
+            OwnState::Replaced { replace, with } => f
+                .debug_tuple("OwnState::Replace")
+                .field(&replace.as_str())
+                .field(&with.as_str())
+                .finish(),
+            OwnState::Remove(id) => f
+                .debug_tuple("OwnState::Remove")
+                .field(&id.as_str())
+                .finish(),
+            OwnState::Used(id) => f.debug_tuple("OwnState::Used").field(&id.as_str()).finish(),
+            OwnState::NotResolved(id) => f
+                .debug_tuple("OwnState::NotResolved")
+                .field(&id.as_str())
+                .finish(),
+        }
+    }
 }
 
 impl<T> Deref for OwnState<T> {
@@ -26,8 +62,9 @@ impl<T> Deref for OwnState<T> {
         match self {
             OwnState::Clean(id)
             | OwnState::NotResolved(id)
-            | OwnState::Replaced { remove: id, .. }
-            | OwnState::Add(id) // TODO will this work ?
+            | OwnState::Replaced { replace: id, .. }
+            | OwnState::Add(id)
+            | OwnState::Used(id)
             | OwnState::Remove(id) => id,
         }
     }
@@ -131,7 +168,7 @@ pub fn resolve(
     // don't honor events we cannot "verify"
     all_conflicted.retain(|id| event_map.contains_key(id));
 
-    // get only the power events with a state_key: "" or ban/kick event (sender != state_key)
+    // get only the control events with a state_key: "" or ban/kick event (sender != state_key)
     let power_events = all_conflicted
         .iter()
         .filter(|id| is_power_event(id, &event_map))
@@ -139,7 +176,7 @@ pub fn resolve(
         .collect::<Vec<_>>();
 
     // sort the power events based on power_level/clock/event_id and outgoing/incoming edges
-    let sorted_power_levels = StateResolution::reverse_topological_power_sort(
+    let sorted_control_events = StateResolution::reverse_topological_power_sort(
         room_id,
         &power_events,
         &mut event_map,
@@ -149,65 +186,42 @@ pub fn resolve(
 
     tracing::debug!(
         "SRTD {:?}",
-        sorted_power_levels
+        sorted_control_events
             .iter()
             .map(ToString::to_string)
             .collect::<Vec<_>>()
     );
 
     // sequentially auth check each power level event event.
-    let resolved = StateResolution::iterative_auth_check(
+    let resolved_control_events = StateResolution::iterative_auth_check(
         room_id,
         room_version,
-        &sorted_power_levels,
+        &sorted_control_events,
         &clean,
         &mut event_map,
         store,
     )?;
 
-    // Mark the resolved power_events as clean
-    for id in own_state.iter_mut() {
-        if resolved.values().any(|res_id| (&*id).deref() == res_id) {
-            *id = OwnState::Clean((&*id).deref().clone());
-        }
-    }
-
-    // Now check that there are no additional events in the power_events
-    for p_event in resolved.values().filter_map(|id| event_map.get(id)) {
-        if let Some(idx) = own_state
-            .iter()
-            .position(|id| (&*id).deref() == &p_event.event_id())
-        {
-            // TODO This case should never happen because of the above loop right?
-            if let OwnState::NotResolved(id) = &mut own_state[idx] {
-                own_state[idx] = OwnState::Clean(id.clone())
-            }
-        // This is the check we need
-        } else {
-            for prev in p_event.prev_event_ids() {
-                if let Some(idx) = own_state.iter().position(|id| (&*id).deref() == &prev) {
-                    own_state.insert(idx, OwnState::Add(p_event.event_id()));
-                    break;
-                } else {
-                    todo!("found unconnected state event");
-                }
-            }
-        }
-    }
-
     tracing::debug!(
         "AUTHED {:?}",
-        resolved
+        resolved_control_events
             .iter()
             .map(|(key, id)| (key, id.to_string()))
             .collect::<Vec<_>>()
     );
 
-    // Normally the resolved power events are filtered out as they don't need to
-    // be authed again, since we want the whole state we sort everything
-    let events_to_resolve = all_conflicted;
+    // This removes the control events that passed auth and more importantly those that failed auth
+    let events_to_resolve = all_conflicted
+        .iter()
+        .filter(|id| {
+            // remove values that are non-resolved control events
+            !sorted_control_events.contains(id)
+                || resolved_control_events.values().any(|c_id| *id == c_id)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
 
-    let power_event = resolved.get(&(EventType::RoomPowerLevels, Some("".into())));
+    let power_event = resolved_control_events.get(&(EventType::RoomPowerLevels, Some("".into())));
 
     tracing::debug!("PL {:?}", power_event);
 
@@ -231,20 +245,56 @@ pub fn resolve(
         room_id,
         room_version,
         &sorted_events,
-        &resolved,
+        &resolved_control_events,
         &mut event_map,
         store,
     )?;
 
+    let peek_state = own_state.to_vec();
+
+    let mut replaced = vec![];
     for id in own_state.iter_mut() {
-        if resolved.values().any(|res_id| (&*id).deref() == res_id) {
+        if resolved_state
+            .values()
+            .any(|res_id| (&*id).deref() == res_id)
+        {
             *id = OwnState::Clean((&*id).deref().clone());
         } else {
+            if matches!(id, OwnState::Clean(_)) {
+                continue;
+            }
+
+            if let Some(old) =
+                StateResolution::get_or_load_event(room_id, (&*id).deref(), &mut event_map, store)
+            {
+                let key = (old.kind(), old.state_key());
+                if let Some(replacement) = resolved_state.get(&key) {
+                    *id = OwnState::Replaced {
+                        replace: old.event_id(),
+                        with: replacement.clone(),
+                    };
+                    // mark the replacement as Used so it is not
+                    // inserted out of order into the DB
+                    if let Some(used_idx) = peek_state
+                        .iter()
+                        .position(|id| (&*id).deref() == replacement)
+                    {
+                        replaced.push(used_idx);
+                    }
+                    continue;
+                }
+            }
             // TODO this stays ? (`let events_to_resolve = all_conflicted;`) ~40 lines up
             // we may still be able to filter the power_events out so the following is valid
-            // all events have to known at this time for this to work
+            // all events have to be known at this time for this to work
             *id = OwnState::Remove((&*id).deref().clone());
         }
+    }
+
+    for index in replaced {
+        let event_id = own_state[index].deref().clone();
+
+        own_state[index] = OwnState::Used(event_id);
     }
 
     // Now check that there are no additional events in the power_events
@@ -253,18 +303,22 @@ pub fn resolve(
             .iter()
             .position(|id| (&*id).deref() == &res_event.event_id())
         {
+            let own_evid = &own_state[idx];
+
             // TODO This case should never happen because of the above loop right?
-            if let OwnState::NotResolved(id) = &mut own_state[idx] {
-                own_state[idx] = OwnState::Clean(id.clone())
+            if let OwnState::NotResolved(id) = own_evid {
+                own_state[idx] = OwnState::Clean(id.clone());
             }
-        // This is the check we need
+        // This is the check we need, if we don't have an event in our state but it
+        // exists in the resolved state add it where it belongs
         } else {
             for prev in res_event.prev_event_ids() {
                 if let Some(idx) = own_state.iter().position(|id| (&*id).deref() == &prev) {
                     own_state.insert(idx, OwnState::Add(res_event.event_id()));
                     break;
                 } else {
-                    todo!("we have a completely unconnected state event")
+                    // TODO no parent event found this means we have a... soft fail and continuing fork?
+                    own_state.insert(0, OwnState::Add(res_event.event_id()));
                 }
             }
         }
@@ -273,6 +327,8 @@ pub fn resolve(
     for id in &own_state {
         assert!(!matches!(id, OwnState::NotResolved(_)))
     }
+
+    println!("{:#?}", own_state);
 
     // add unconflicted state to the resolved state
     resolved_state.extend(clean);

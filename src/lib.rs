@@ -124,17 +124,17 @@ impl StateResolution {
         // don't honor events we cannot "verify"
         all_conflicted.retain(|id| event_map.contains_key(id));
 
-        // get only the power events with a state_key: "" or ban/kick event (sender != state_key)
-        let power_events = all_conflicted
+        // get only the control events with a state_key: "" or ban/kick event (sender != state_key)
+        let control_events = all_conflicted
             .iter()
             .filter(|id| is_power_event(id, &event_map))
             .cloned()
             .collect::<Vec<_>>();
 
-        // sort the power events based on power_level/clock/event_id and outgoing/incoming edges
-        let mut sorted_power_levels = StateResolution::reverse_topological_power_sort(
+        // sort the control events based on power_level/clock/event_id and outgoing/incoming edges
+        let mut sorted_control_levels = StateResolution::reverse_topological_power_sort(
             room_id,
-            &power_events,
+            &control_events,
             &mut event_map,
             store,
             &all_conflicted,
@@ -142,17 +142,17 @@ impl StateResolution {
 
         tracing::debug!(
             "SRTD {:?}",
-            sorted_power_levels
+            sorted_control_levels
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
         );
 
-        // sequentially auth check each power level event event.
+        // sequentially auth check each control event.
         let resolved = StateResolution::iterative_auth_check(
             room_id,
             room_version,
-            &sorted_power_levels,
+            &sorted_control_levels,
             &clean,
             &mut event_map,
             store,
@@ -166,12 +166,12 @@ impl StateResolution {
                 .collect::<Vec<_>>()
         );
 
-        // At this point the power_events have been resolved we now have to
+        // At this point the control_events have been resolved we now have to
         // sort the remaining events using the mainline of the resolved power level.
-        sorted_power_levels.dedup();
-        let deduped_power_ev = sorted_power_levels;
+        sorted_control_levels.dedup();
+        let deduped_power_ev = sorted_control_levels;
 
-        // we have resolved the power events so remove them, I'm sure there are other reasons to do so
+        // This removes the control events that passed auth and more importantly those that failed auth
         let events_to_resolve = all_conflicted
             .iter()
             .filter(|id| !deduped_power_ev.contains(id))
@@ -479,13 +479,18 @@ impl StateResolution {
 
     /// Check the that each event is authenticated based on the events before it.
     ///
-    /// For each `power_events` event we gather the events needed to auth it from the
+    /// ## Returns
+    ///
+    /// The `unconflicted_state` combined with the newly auth'ed events. So any event that
+    /// fails the `event_auth::auth_check` will be excluded from the returned `StateMap<EventId>`.
+    ///
+    /// For each `events_to_check` event we gather the events needed to auth it from the
     /// `event_map` or `store` and verify each event using the `event_auth::auth_check`
     /// function.
     pub fn iterative_auth_check(
         room_id: &RoomId,
         room_version: &RoomVersionId,
-        power_events: &[EventId],
+        events_to_check: &[EventId],
         unconflicted_state: &StateMap<EventId>,
         event_map: &mut EventMap<StateEvent>,
         store: &dyn StateStore,
@@ -493,8 +498,8 @@ impl StateResolution {
         tracing::info!("starting iterative auth check");
 
         tracing::debug!(
-            "{:?}",
-            power_events
+            "performing auth checks on {:?}",
+            events_to_check
                 .iter()
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
@@ -502,7 +507,7 @@ impl StateResolution {
 
         let mut resolved_state = unconflicted_state.clone();
 
-        for (idx, event_id) in power_events.iter().enumerate() {
+        for (idx, event_id) in events_to_check.iter().enumerate() {
             let event =
                 StateResolution::get_or_load_event(room_id, event_id, event_map, store).unwrap();
 
@@ -512,7 +517,7 @@ impl StateResolution {
                     StateResolution::get_or_load_event(room_id, &aid, event_map, store)
                 {
                     // TODO what to do when no state_key is found ??
-                    // TODO synapse check "rejected_reason", I'm guessing this is redacted_because for ruma ??
+                    // TODO synapse check "rejected_reason", I'm guessing this is redacted_because in ruma ??
                     auth_events.insert((ev.kind(), ev.state_key()), ev);
                 } else {
                     tracing::warn!("auth event id for {} is missing {}", aid, event_id);
@@ -535,7 +540,7 @@ impl StateResolution {
                 }
             }
 
-            tracing::debug!("event to check {:?}", event.event_id().to_string());
+            tracing::debug!("event to check {:?}", event.event_id().as_str());
 
             let most_recent_prev_event = event
                 .prev_event_ids()
@@ -570,7 +575,12 @@ impl StateResolution {
     }
 
     /// Returns the sorted `to_sort` list of `EventId`s based on a mainline sort using
-    /// the `resolved_power_level`.
+    /// the depth of `resolved_power_level`, the server timestamp, and the eventId.
+    ///
+    /// The depth of the given event is calculated based on the depth of it's closest "parent"
+    /// power_level event. If there have been two power events the after the most recent are
+    /// depth 0, the events before (with the first power level as a parent) will be marked
+    /// as depth 1. depth 1 is "older" than depth 0.
     pub fn mainline_sort(
         room_id: &RoomId,
         to_sort: &[EventId],
