@@ -81,7 +81,7 @@ fn resolve_deeper_event_set(c: &mut Criterion) {
             inner.get(&event_id("PA")).unwrap(),
         ]
         .iter()
-        .map(|ev| ((ev.kind(), ev.state_key()), ev.event_id()))
+        .map(|ev| ((ev.kind(), ev.state_key()), ev.event_id().clone()))
         .collect::<StateMap<_>>();
 
         let state_set_b = [
@@ -94,7 +94,7 @@ fn resolve_deeper_event_set(c: &mut Criterion) {
             inner.get(&event_id("PA")).unwrap(),
         ]
         .iter()
-        .map(|ev| ((ev.kind(), ev.state_key()), ev.event_id()))
+        .map(|ev| ((ev.kind(), ev.state_key()), ev.event_id().clone()))
         .collect::<StateMap<_>>();
 
         b.iter(|| {
@@ -163,7 +163,7 @@ impl TestStore {
             &[cre.clone()],
         );
         self.0
-            .insert(alice_mem.event_id(), Arc::clone(&alice_mem));
+            .insert(alice_mem.event_id().clone(), Arc::clone(&alice_mem));
 
         let join_rules = to_pdu_event(
             "IJR",
@@ -171,11 +171,11 @@ impl TestStore {
             EventType::RoomJoinRules,
             Some(""),
             json!({ "join_rule": JoinRule::Public }),
-            &[cre.clone(), alice_mem.event_id()],
-            &[alice_mem.event_id()],
+            &[cre.clone(), alice_mem.event_id().clone()],
+            &[alice_mem.event_id().clone()],
         );
         self.0
-            .insert(join_rules.event_id(), Arc::clone(&join_rules));
+            .insert(join_rules.event_id().clone(), Arc::clone(&join_rules));
 
         // Bob and Charlie join at the same time, so there is a fork
         // this will be represented in the state_sets when we resolve
@@ -185,11 +185,11 @@ impl TestStore {
             EventType::RoomMember,
             Some(bob().to_string().as_str()),
             member_content_join(),
-            &[cre.clone(), join_rules.event_id()],
-            &[join_rules.event_id()],
+            &[cre.clone(), join_rules.event_id().clone()],
+            &[join_rules.event_id().clone()],
         );
         self.0
-            .insert(bob_mem.event_id(), Arc::clone(&bob_mem));
+            .insert(bob_mem.event_id().clone(), Arc::clone(&bob_mem));
 
         let charlie_mem = to_pdu_event(
             "IMC",
@@ -201,16 +201,16 @@ impl TestStore {
             &[join_rules.event_id()],
         );
         self.0
-            .insert(charlie_mem.event_id(), Arc::clone(&charlie_mem));
+            .insert(charlie_mem.event_id().clone(), Arc::clone(&charlie_mem));
 
         let state_at_bob = [&create_event, &alice_mem, &join_rules, &bob_mem]
             .iter()
-            .map(|e| ((e.kind(), e.state_key()), e.event_id()))
+            .map(|e| ((e.kind(), e.state_key()), e.event_id().clone()))
             .collect::<StateMap<_>>();
 
         let state_at_charlie = [&create_event, &alice_mem, &join_rules, &charlie_mem]
             .iter()
-            .map(|e| ((e.kind(), e.state_key()), e.event_id()))
+            .map(|e| ((e.kind(), e.state_key()), e.event_id().clone()))
             .collect::<StateMap<_>>();
 
         let expected = [
@@ -221,7 +221,7 @@ impl TestStore {
             &charlie_mem,
         ]
         .iter()
-        .map(|e| ((e.kind(), e.state_key()), e.event_id()))
+        .map(|e| ((e.kind(), e.state_key()), e.event_id().clone()))
         .collect::<StateMap<_>>();
 
         (state_at_bob, state_at_charlie, expected)
@@ -437,7 +437,7 @@ fn INITIAL_EVENTS() -> BTreeMap<EventId, Arc<StateEvent>> {
         ),
     ]
     .into_iter()
-    .map(|ev| (ev.event_id(), ev))
+    .map(|ev| (ev.event_id().clone(), ev))
     .collect()
 }
 
@@ -483,6 +483,6 @@ fn BAN_STATE_SET() -> BTreeMap<EventId, Arc<StateEvent>> {
         ),
     ]
     .into_iter()
-    .map(|ev| (ev.event_id(), ev))
+    .map(|ev| (ev.event_id().clone(), ev))
     .collect()
 }

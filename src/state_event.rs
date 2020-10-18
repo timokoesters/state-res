@@ -23,7 +23,7 @@ pub struct Requester<'a> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum StateEvent {
-    Full(Pdu),
+    Full((EventId, Pdu)),
     #[serde(skip_deserializing)]
     Sync(PduStub),
 }
@@ -41,7 +41,7 @@ impl StateEvent {
 
     pub fn is_power_event(&self) -> bool {
         match self {
-            Self::Full(any_event) => match any_event {
+            Self::Full((_, any_event)) => match any_event {
                 Pdu::RoomV1Pdu(event) => match event.kind {
                     EventType::RoomPowerLevels
                     | EventType::RoomJoinRules
@@ -96,7 +96,7 @@ impl StateEvent {
         &self,
     ) -> Result<C, serde_json::Error> {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => serde_json::from_value(ev.content.clone()),
                 Pdu::RoomV3Pdu(ev) => serde_json::from_value(ev.content.clone()),
             },
@@ -108,7 +108,7 @@ impl StateEvent {
     }
     pub fn origin_server_ts(&self) -> &SystemTime {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => &ev.origin_server_ts,
                 Pdu::RoomV3Pdu(ev) => &ev.origin_server_ts,
             },
@@ -120,17 +120,14 @@ impl StateEvent {
     }
     pub fn event_id(&self) -> &EventId {
         match self {
-            Self::Full(ev) => match ev {
-                Pdu::RoomV1Pdu(ev) => &ev.event_id,
-                Pdu::RoomV3Pdu(ev) => ev.event_id.as_ref().expect("RoomV3Pdu did not have an event id"),
-            },
+            Self::Full((id, _)) => id,
             Self::Sync(_ev) => panic!("Stubs don't have an event id"),
         }
     }
 
     pub fn sender(&self) -> &UserId {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => &ev.sender,
                 Pdu::RoomV3Pdu(ev) => &ev.sender,
             },
@@ -143,7 +140,7 @@ impl StateEvent {
 
     pub fn redacts(&self) -> Option<&EventId> {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => ev.redacts.as_ref(),
                 Pdu::RoomV3Pdu(ev) => ev.redacts.as_ref(),
             },
@@ -156,7 +153,7 @@ impl StateEvent {
 
     pub fn room_id(&self) -> Option<&RoomId> {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => Some(&ev.room_id),
                 Pdu::RoomV3Pdu(ev) => Some(&ev.room_id),
             },
@@ -165,7 +162,7 @@ impl StateEvent {
     }
     pub fn kind(&self) -> EventType {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => ev.kind.clone(),
                 Pdu::RoomV3Pdu(ev) => ev.kind.clone(),
             },
@@ -177,7 +174,7 @@ impl StateEvent {
     }
     pub fn state_key(&self) -> String {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => ev.state_key.clone(),
                 Pdu::RoomV3Pdu(ev) => ev.state_key.clone(),
             },
@@ -191,7 +188,7 @@ impl StateEvent {
     #[cfg(not(feature = "unstable-pre-spec"))]
     pub fn origin(&self) -> String {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => ev.origin.clone(),
                 Pdu::RoomV3Pdu(ev) => ev.origin.clone(),
             },
@@ -204,7 +201,7 @@ impl StateEvent {
 
     pub fn prev_event_ids(&self) -> Vec<EventId> {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => ev.prev_events.iter().map(|(id, _)| id).cloned().collect(),
                 Pdu::RoomV3Pdu(ev) => ev.prev_events.clone(),
             },
@@ -219,7 +216,7 @@ impl StateEvent {
 
     pub fn auth_events(&self) -> Vec<EventId> {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => ev.auth_events.iter().map(|(id, _)| id).cloned().collect(),
                 Pdu::RoomV3Pdu(ev) => ev.auth_events.to_vec(),
             },
@@ -234,7 +231,7 @@ impl StateEvent {
 
     pub fn content(&self) -> &serde_json::Value {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => &ev.content,
                 Pdu::RoomV3Pdu(ev) => &ev.content,
             },
@@ -249,7 +246,7 @@ impl StateEvent {
         // CONFIRM: The only way this would fail is if we got bad json, it should fail in ruma
         // before it fails here.
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => &ev.unsigned,
                 Pdu::RoomV3Pdu(ev) => &ev.unsigned,
             },
@@ -262,7 +259,7 @@ impl StateEvent {
 
     pub fn signatures(&self) -> BTreeMap<Box<ServerName>, BTreeMap<ruma::ServerKeyId, String>> {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(_) => maplit::btreemap! {},
                 Pdu::RoomV3Pdu(ev) => ev.signatures.clone(),
             },
@@ -275,7 +272,7 @@ impl StateEvent {
 
     pub fn hashes(&self) -> &EventHash {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => &ev.hashes,
                 Pdu::RoomV3Pdu(ev) => &ev.hashes,
             },
@@ -288,7 +285,7 @@ impl StateEvent {
 
     pub fn depth(&self) -> &UInt {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => &ev.depth,
                 Pdu::RoomV3Pdu(ev) => &ev.depth,
             },
@@ -301,7 +298,7 @@ impl StateEvent {
 
     pub fn is_type_and_key(&self, ev_type: EventType, state_key: &str) -> bool {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(ev) => {
                     ev.kind == ev_type && ev.state_key.as_deref() == Some(state_key)
                 }
@@ -326,7 +323,7 @@ impl StateEvent {
     /// version 3 and above.
     pub fn room_version(&self) -> RoomVersionId {
         match self {
-            Self::Full(ev) => match ev {
+            Self::Full((_, ev)) => match ev {
                 Pdu::RoomV1Pdu(_) => RoomVersionId::Version1,
                 Pdu::RoomV3Pdu(_) => RoomVersionId::Version3,
             },

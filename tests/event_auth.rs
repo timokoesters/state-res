@@ -235,7 +235,7 @@ fn INITIAL_EVENTS() -> BTreeMap<EventId, Arc<StateEvent>> {
         ),
     ]
     .into_iter()
-    .map(|ev| (ev.event_id(), ev))
+    .map(|ev| (ev.event_id().clone(), ev))
     .collect()
 }
 

@@ -266,7 +266,7 @@ fn INITIAL_EVENTS() -> BTreeMap<EventId, Arc<StateEvent>> {
         to_init_pdu_event("END", zera(), EventType::RoomMessage, None, json!({})),
     ]
     .into_iter()
-    .map(|ev| (ev.event_id(), ev))
+    .map(|ev| (ev.event_id().clone(), ev))
     .collect()
 }
 
@@ -292,7 +292,7 @@ fn do_check(events: &[Arc<StateEvent>], edges: Vec<Vec<EventId>>, expected_state
         INITIAL_EVENTS()
             .values()
             .chain(events)
-            .map(|ev| (ev.event_id(), ev.clone()))
+            .map(|ev| (ev.event_id().clone(), ev.clone()))
             .collect(),
     );
 
@@ -304,8 +304,8 @@ fn do_check(events: &[Arc<StateEvent>], edges: Vec<Vec<EventId>>, expected_state
     // create the DB of events that led up to this point
     // TODO maybe clean up some of these clones it is just tests but...
     for ev in INITIAL_EVENTS().values().chain(events) {
-        graph.insert(ev.event_id(), vec![]);
-        fake_event_map.insert(ev.event_id(), ev.clone());
+        graph.insert(ev.event_id().clone(), vec![]);
+        fake_event_map.insert(ev.event_id().clone(), ev.clone());
     }
 
     for pair in INITIAL_EDGES().windows(2) {
@@ -380,17 +380,14 @@ fn do_check(events: &[Arc<StateEvent>], edges: Vec<Vec<EventId>>, expected_state
 
         let mut state_after = state_before.clone();
 
-        if fake_event.state_key().is_some() {
-            let ty = fake_event.kind().clone();
-            // we know there is a state_key unwrap OK
-            let key = fake_event.state_key().clone();
-            state_after.insert((ty, key), event_id.clone());
-        }
+        let ty = fake_event.kind().clone();
+        let key = fake_event.state_key().clone();
+        state_after.insert((ty, key), event_id.clone());
 
         let auth_types = state_res::auth_types_for_event(
             fake_event.kind(),
             fake_event.sender(),
-            fake_event.state_key(),
+            Some(fake_event.state_key()),
             fake_event.content().clone(),
         );
 
@@ -409,7 +406,7 @@ fn do_check(events: &[Arc<StateEvent>], edges: Vec<Vec<EventId>>, expected_state
             &e.event_id().to_string(),
             e.sender().clone(),
             e.kind(),
-            e.state_key().as_deref(),
+            Some(&e.state_key()),
             e.content().clone(),
             &auth_events,
             prev_events,
@@ -791,7 +788,7 @@ impl TestStore {
             &[cre.clone()],
         );
         self.0
-            .insert(alice_mem.event_id(), Arc::clone(&alice_mem));
+            .insert(alice_mem.event_id().clone(), Arc::clone(&alice_mem));
 
         let join_rules = to_pdu_event(
             "IJR",
@@ -799,11 +796,11 @@ impl TestStore {
             EventType::RoomJoinRules,
             Some(""),
             json!({ "join_rule": JoinRule::Public }),
-            &[cre.clone(), alice_mem.event_id()],
-            &[alice_mem.event_id()],
+            &[cre.clone(), alice_mem.event_id().clone()],
+            &[alice_mem.event_id().clone()],
         );
         self.0
-            .insert(join_rules.event_id(), join_rules.clone());
+            .insert(join_rules.event_id().clone(), join_rules.clone());
 
         // Bob and Charlie join at the same time, so there is a fork
         // this will be represented in the state_sets when we resolve
@@ -813,11 +810,11 @@ impl TestStore {
             EventType::RoomMember,
             Some(bob().to_string().as_str()),
             member_content_join(),
-            &[cre.clone(), join_rules.event_id()],
-            &[join_rules.event_id()],
+            &[cre.clone(), join_rules.event_id().clone()],
+            &[join_rules.event_id().clone()],
         );
         self.0
-            .insert(bob_mem.event_id(), bob_mem.clone());
+            .insert(bob_mem.event_id().clone(), bob_mem.clone());
 
         let charlie_mem = to_pdu_event(
             "IMC",
@@ -829,16 +826,16 @@ impl TestStore {
             &[join_rules.event_id()],
         );
         self.0
-            .insert(charlie_mem.event_id(), charlie_mem.clone());
+            .insert(charlie_mem.event_id().clone(), charlie_mem.clone());
 
         let state_at_bob = [&create_event, &alice_mem, &join_rules, &bob_mem]
             .iter()
-            .map(|e| ((e.kind(), e.state_key()), e.event_id()))
+            .map(|e| ((e.kind(), e.state_key()), e.event_id().clone()))
             .collect::<StateMap<_>>();
 
         let state_at_charlie = [&create_event, &alice_mem, &join_rules, &charlie_mem]
             .iter()
-            .map(|e| ((e.kind(), e.state_key()), e.event_id()))
+            .map(|e| ((e.kind(), e.state_key()), e.event_id().clone()))
             .collect::<StateMap<_>>();
 
         let expected = [
@@ -849,7 +846,7 @@ impl TestStore {
             &charlie_mem,
         ]
         .iter()
-        .map(|e| ((e.kind(), e.state_key()), e.event_id()))
+        .map(|e| ((e.kind(), e.state_key()), e.event_id().clone()))
         .collect::<StateMap<_>>();
 
         (state_at_bob, state_at_charlie, expected)

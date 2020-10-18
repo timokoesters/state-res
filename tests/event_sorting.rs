@@ -226,7 +226,7 @@ fn INITIAL_EVENTS() -> BTreeMap<EventId, Arc<StateEvent>> {
         ),
     ]
     .into_iter()
-    .map(|ev| (ev.event_id(), ev))
+    .map(|ev| (ev.event_id().clone(), ev))
     .collect()
 }
 
@@ -254,7 +254,7 @@ fn test_event_sort() {
     let power_events = event_map
         .values()
         .filter(|pdu| pdu.is_power_event())
-        .map(|pdu| pdu.event_id())
+        .map(|pdu| pdu.event_id().clone())
         .collect::<Vec<_>>();
 
     // This is a TODO in conduit
@@ -285,7 +285,7 @@ fn test_event_sort() {
 
     shuffle(&mut events_to_sort);
 
-    let power_level = resolved_power.get(&(EventType::RoomPowerLevels, Some("".into())));
+    let power_level = resolved_power.get(&(EventType::RoomPowerLevels, "".to_owned()));
 
     let sorted_event_ids = state_res::StateResolution::mainline_sort(
         &room_id(),

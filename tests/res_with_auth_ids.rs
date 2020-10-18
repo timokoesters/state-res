@@ -33,7 +33,7 @@ fn do_check(events: &[Arc<StateEvent>], edges: Vec<Vec<EventId>>, expected_state
         INITIAL_EVENTS()
             .values()
             .chain(events)
-            .map(|ev| (ev.event_id(), ev.clone()))
+            .map(|ev| (ev.event_id().clone(), ev.clone()))
             .collect(),
     );
 
@@ -115,17 +115,14 @@ fn do_check(events: &[Arc<StateEvent>], edges: Vec<Vec<EventId>>, expected_state
 
         let mut state_after = state_before.clone();
 
-        if fake_event.state_key().is_some() {
-            let ty = fake_event.kind().clone();
-            // we know there is a state_key unwrap OK
-            let key = fake_event.state_key().clone();
-            state_after.insert((ty, key), event_id.clone());
-        }
+        let ty = fake_event.kind().clone();
+        let key = fake_event.state_key().clone();
+        state_after.insert((ty, key), event_id.clone());
 
         let auth_types = state_res::auth_types_for_event(
             fake_event.kind(),
             fake_event.sender(),
-            fake_event.state_key(),
+            Some(fake_event.state_key()),
             fake_event.content().clone(),
         );
 
@@ -144,7 +141,7 @@ fn do_check(events: &[Arc<StateEvent>], edges: Vec<Vec<EventId>>, expected_state
             &e.event_id().to_string(),
             e.sender().clone(),
             e.kind(),
-            e.state_key().as_deref(),
+            Some(&e.state_key()),
             e.content().clone(),
             &auth_events,
             prev_events,
@@ -417,7 +414,7 @@ fn INITIAL_EVENTS() -> BTreeMap<EventId, Arc<StateEvent>> {
         ),
     ]
     .into_iter()
-    .map(|ev| (ev.event_id(), ev))
+    .map(|ev| (ev.event_id().clone(), ev))
     .collect()
 }
 
@@ -471,7 +468,7 @@ fn BAN_STATE_SET() -> BTreeMap<EventId, Arc<StateEvent>> {
         ),
     ]
     .into_iter()
-    .map(|ev| (ev.event_id(), ev))
+    .map(|ev| (ev.event_id().clone(), ev))
     .collect()
 }
 
@@ -509,7 +506,7 @@ fn base_with_auth_chains() {
     let resolved = resolved
         .values()
         .cloned()
-        .chain(INITIAL_EVENTS().values().map(|e| e.event_id()))
+        .chain(INITIAL_EVENTS().values().map(|e| e.event_id().clone()))
         .collect::<Vec<_>>();
 
     let expected = vec![
@@ -548,7 +545,7 @@ fn ban_with_auth_chains2() {
         inner.get(&event_id("PA")).unwrap(),
     ]
     .iter()
-    .map(|ev| ((ev.kind(), ev.state_key()), ev.event_id()))
+    .map(|ev| ((ev.kind(), ev.state_key()), ev.event_id().clone()))
     .collect::<BTreeMap<_, _>>();
 
     let state_set_b = [
@@ -561,7 +558,7 @@ fn ban_with_auth_chains2() {
         inner.get(&event_id("PA")).unwrap(),
     ]
     .iter()
-    .map(|ev| ((ev.kind(), ev.state_key()), ev.event_id()))
+    .map(|ev| ((ev.kind(), ev.state_key()), ev.event_id().clone()))
     .collect::<StateMap<_>>();
 
     let resolved: StateMap<EventId> = match StateResolution::resolve(
@@ -628,7 +625,7 @@ fn JOIN_RULE() -> BTreeMap<EventId, Arc<StateEvent>> {
         ),
     ]
     .into_iter()
-    .map(|ev| (ev.event_id(), ev))
+    .map(|ev| (ev.event_id().clone(), ev))
     .collect()
 }
 
