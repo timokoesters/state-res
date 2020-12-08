@@ -23,7 +23,7 @@ thiserror = "1.0.22"
 git = "https://github.com/ruma/ruma"
 # branch = "dev/unstable-join"
 # path = "../__forks__/ruma/ruma"
-rev = "ee814aa84934530d76f5e4b275d739805b49bdef"
+rev = "cc07d26af688697229b3710178460ac5ffe657a4"
 features = ["client-api", "federation-api", "appservice-api", "unstable-pre-spec", "unstable-synapse-quirks"]
 
 #[dependencies.ruma]
